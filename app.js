@@ -3,39 +3,28 @@ import path from 'path';
 import axios from 'axios';
 import ffmpegPath from 'ffmpeg-static';
 import { spawn } from 'child_process';
-import { uploadFile } from './fun.js';
-import https from 'https'
-const agent = new https.Agent({
-    rejectUnauthorized: false
-});
-
+import {uploadFile} from './fun.js';
 
 
 const radios = {
     galeyIsrael: {
         streamUrl: 'https://cdn.cybercdn.live/Galei_Israel/Live/icecast.audio',
-        segmentDuration: 100,
-        outputDirectory: 'galey_israel_tmp',
-        shId: '884338'
+        segmentDuration: 60,
+        outputDirectory: 'Radio_galey_israel_tmp',
+        shId: '884338',
     },
     radioHaifa: {
         streamUrl: 'https://1075.livecdn.biz/radiohaifa',
-        segmentDuration: 100,
+        segmentDuration: 60,
         outputDirectory: 'Radio_Haifa_tmp',
         shId: '884340'
     },
     radioDarom: {
         streamUrl: 'https://cdn.cybercdn.live/Darom_97FM/Live/icecast.audio',
-        segmentDuration: 100,
+        segmentDuration: 60,
         outputDirectory: 'Radio_Darom_tmp',
         shId: '884342'
     },
-    radioTelAviv: {
-        streamUrl: 'https://102.livecdn.biz/102fm_aac',
-        segmentDuration: 100,
-        outputDirectory: 'Radio_TelAviv_tmp',
-        shId: '902309'
-    }
 };
 
 Object.values(radios).forEach(radio => {
@@ -62,24 +51,40 @@ function streamRadio(radioConfig) {
         path.join(outputDirectory, `${formatDate(startTime)}-%03d.mp3`)
     ]);
 
-    axios.get(streamUrl, { responseType: 'stream', httpsAgent: agent })
-        .then(response => {
-            response.data.pipe(ffmpeg.stdin);
-            watchDirectory(outputDirectory, shId, lastFileName);
-        })
-    // .catch(err => console.error('Failed to stream:', err));
+    const startStreaming = () => {
+        axios.get(streamUrl, { responseType: 'stream' })
+            .then(response => {
+                response.data.pipe(ffmpeg.stdin);
+                watchDirectory(outputDirectory, shId, () => lastFileName);
+            })
+            .catch(err => {
+                console.error('Failed to stream:', err);
+                setTimeout(startStreaming, 5000); // נסה להתחבר מחדש לאחר 5 שניות
+            });
+    };
 
-    ffmpeg.on('close', code => console.log(`ffmpeg process exited with code ${code}`));
+    startStreaming();
+
+    ffmpeg.on('close', code => {
+        console.log(`ffmpeg process exited with code ${code}`);
+        setTimeout(startStreaming, 5000); // נסה להתחבר מחדש לאחר 5 שניות
+    });
+
+    ffmpeg.stderr.on('data', data => console.error(`ffmpeg error: ${data}`));
 }
 
-function watchDirectory(directory, shId, lastFileName) {
+function watchDirectory(directory, shId) {
+    let lastFileName = null; // שמור על המצב של שם הקובץ האחרון
+
     fs.watch(directory, { persistent: true }, (eventType, filename) => {
         if (eventType === 'rename' && filename) {
             const filePath = path.join(directory, filename);
             if (fs.existsSync(filePath)) {
                 if (lastFileName) {
                     const lastFilePath = path.join(directory, lastFileName);
-                    uploadFile(lastFilePath, shId).catch(err => console.error(`Failed to upload ${lastFilePath}:`, err));
+                    uploadFile(lastFilePath, shId)
+                        .then(() => fs.unlinkSync(lastFilePath)) // מחק את הקובץ לאחר ההעלאה
+                        .catch(err => console.error(`Failed to upload ${lastFilePath}:`, err));
                 }
                 lastFileName = filename;
             }

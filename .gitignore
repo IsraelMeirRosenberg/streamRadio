@@ -1,1 +1,4 @@
-node_modules
+node_modules/.*
+Radio_Darom_tmp/.*
+Radio_galey_israel_tmp/.*
+Radio_Haifa_tmp/.*
